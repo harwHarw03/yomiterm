@@ -1,0 +1,16 @@
+# binaries
+/yomiterm
+*.exe
+*.out
+
+*.db
+*.db-wal
+*.db-shm
+
+dicts/
+
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+.vscode/
+.idea/
