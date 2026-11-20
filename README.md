@@ -85,10 +85,12 @@ Try the included sample document:
 | | `Ctrl+d` / `Ctrl+u` | Half-page down / up |
 | **Lookup** | `Enter` or `Space` | Look up word at cursor and focus popup |
 | | `a` | Toggle Auto-Scan mode (live popup while moving) |
-| **Popup** | `J` / `K` or `Ctrl+d` / `Ctrl+u` | Scroll popup down / up |
+| **Popup** | `h` / `j` / `k` / `l` (`w`/`b`/`0`/`$`) | Move in-popup cursor over definitions & examples |
+| | `Enter` or `Space` | Look up word under in-popup cursor (child popup, up to 5 levels) |
+| | `J` / `K` or `Ctrl+d` / `Ctrl+u` | Scroll popup down / up |
 | | `Tab` | Switch between **Terms** and **Kanji** tabs |
 | | `e` | Toggle example sentences |
-| | `Esc` | Close popup |
+| | `Esc` / `q` | Pop topmost child popup (`Esc`) / close all popups (`q`) |
 | **Search** | `/` | Incremental search (`n` / `N` for next / previous) |
 | **General** | `?` | Toggle help bar |
 | | `q` / `Ctrl+c` | Quit |
