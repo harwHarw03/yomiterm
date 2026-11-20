@@ -6,8 +6,10 @@ type Styles struct {
 	StatusBar     lipgloss.Style
 	StatusBadge   lipgloss.Style
 	HelpBar       lipgloss.Style
-	PopupBox      lipgloss.Style
-	PopupHeader   lipgloss.Style
+	PopupBox         lipgloss.Style
+	PopupBoxInactive lipgloss.Style
+	PopupHeader      lipgloss.Style
+	DepthBadge       lipgloss.Style
 	TabActive     lipgloss.Style
 	TabInactive   lipgloss.Style
 	TermHeadword  lipgloss.Style
@@ -41,10 +43,19 @@ func DefaultStyles() Styles {
 			Background(lipgloss.Color("235")).
 			Foreground(lipgloss.Color("252")).
 			Padding(0, 1),
+		PopupBoxInactive: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("240")).
+			Background(lipgloss.Color("234")).
+			Foreground(lipgloss.Color("248")).
+			Padding(0, 1),
 		PopupHeader: lipgloss.NewStyle().
 			BorderBottom(true).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("240")),
+		DepthBadge: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("222")).
+			Bold(true),
 		TabActive: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("230")).
 			Background(lipgloss.Color("62")).

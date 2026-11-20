@@ -52,7 +52,8 @@ type Model struct {
 	HLStart int
 	HLEnd   int
 
-	Popup PopupState
+	Popups        []PopupState
+	MaxPopupDepth int
 
 	// Search state
 	SearchQuery   string
@@ -68,22 +69,24 @@ func NewModel(fileName, rawMD string, engine *lookup.Engine, cfg *config.Config)
 	if err != nil {
 		return nil, err
 	}
+	maxDepth := cfg.MaxPopupDepth
+	if maxDepth < 1 {
+		maxDepth = 5
+	}
 	return &Model{
-		FileName: fileName,
-		RawMD:    rawMD,
-		Doc:      doc,
-		Engine:   engine,
-		Cfg:      cfg,
-		Cond:     cond,
-		Styles:   DefaultStyles(),
-		Width:    80,
-		Height:   24,
-		AutoScan: cfg.AutoScan,
-		HLStart:  -1,
-		HLEnd:    -1,
-		Popup: PopupState{
-			ShowExamples: cfg.ShowExamples,
-		},
+		FileName:      fileName,
+		RawMD:         rawMD,
+		Doc:           doc,
+		Engine:        engine,
+		Cfg:           cfg,
+		Cond:          cond,
+		Styles:        DefaultStyles(),
+		Width:         80,
+		Height:        24,
+		AutoScan:      cfg.AutoScan,
+		HLStart:       -1,
+		HLEnd:         -1,
+		MaxPopupDepth: maxDepth,
 	}, nil
 }
 
@@ -151,13 +154,13 @@ func (m *Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
 
 	switch key {
 	case "q":
-		if m.Popup.Open && !m.AutoScan {
-			m.closePopup()
+		if len(m.Popups) > 0 && !m.AutoScan {
+			m.closeAllPopups()
 			return m, nil
 		}
 		return m, tea.Quit
 	case "esc":
-		m.closePopup()
+		m.closeAllPopups()
 		return m, nil
 	case "?":
 		m.ShowHelp = !m.ShowHelp
@@ -169,7 +172,7 @@ func (m *Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
 			m.triggerLookup(false)
 		} else {
 			m.StatusMsg = "Auto-Scan OFF"
-			m.closePopup()
+			m.closeAllPopups()
 		}
 		return m, nil
 	case "enter", " ":
@@ -268,34 +271,120 @@ func (m *Model) handleNormalKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handlePopupKey(key string) (tea.Model, tea.Cmd) {
+	if len(m.Popups) == 0 {
+		m.Mode = ModeNormal
+		return m, nil
+	}
+	m.StatusMsg = ""
+	top := &m.Popups[len(m.Popups)-1]
+
 	switch key {
-	case "esc", "q":
+	case "esc":
+		if len(m.Popups) > 1 {
+			// Pop topmost child popup and return focus to its parent
+			m.Popups = m.Popups[:len(m.Popups)-1]
+			m.Popups[len(m.Popups)-1].ClearHighlight()
+			return m, nil
+		}
 		if m.AutoScan {
 			m.Mode = ModeNormal
-			m.Popup.Focused = false
 		} else {
-			m.closePopup()
+			m.closeAllPopups()
 		}
 		return m, nil
-	case "tab":
-		if m.Popup.Tab == TabTerms {
-			m.Popup.Tab = TabKanji
+	case "q":
+		if m.AutoScan && len(m.Popups) == 1 {
+			m.Mode = ModeNormal
 		} else {
-			m.Popup.Tab = TabTerms
+			m.closeAllPopups()
 		}
-		m.Popup.Scroll = 0
+		return m, nil
+	case "enter", " ":
+		m.triggerChildLookup()
+		return m, nil
+	case "tab":
+		if top.Tab == TabTerms {
+			top.Tab = TabKanji
+		} else {
+			top.Tab = TabTerms
+		}
+		top.Scroll = 0
+		top.CursorRow = 0
+		top.CursorIdx = 0
+		top.DesiredCol = 0
+		top.ClearHighlight()
+		top.BodyLines = nil
 	case "e":
-		m.Popup.ShowExamples = !m.Popup.ShowExamples
-	case "J", "j", "down":
-		m.Popup.Scroll++
-	case "K", "k", "up":
-		if m.Popup.Scroll > 0 {
-			m.Popup.Scroll--
+		top.ShowExamples = !top.ShowExamples
+		top.BodyLines = nil
+	case "h", "left":
+		if top.CursorIdx > 0 {
+			top.CursorIdx--
+			top.UpdateDesiredCol()
+			top.ClearHighlight()
+		}
+	case "l", "right":
+		if top.CursorRow < len(top.BodyLines) {
+			toks := top.BodyLines[top.CursorRow].Tokens
+			if top.CursorIdx+1 < len(toks) {
+				top.CursorIdx++
+				top.UpdateDesiredCol()
+				top.ClearHighlight()
+			}
+		}
+	case "j", "down":
+		if top.CursorRow+1 < len(top.BodyLines) {
+			top.CursorRow++
+			top.CursorIdx = cjk.NearestGraphemeAtCol(top.BodyLines[top.CursorRow], top.DesiredCol)
+			top.ClearHighlight()
+			top.EnsureCursorVisible()
+		}
+	case "k", "up":
+		if top.CursorRow > 0 {
+			top.CursorRow--
+			top.CursorIdx = cjk.NearestGraphemeAtCol(top.BodyLines[top.CursorRow], top.DesiredCol)
+			top.ClearHighlight()
+			top.EnsureCursorVisible()
+		}
+	case "w":
+		top.NextWord()
+		top.ClearHighlight()
+		top.EnsureCursorVisible()
+	case "b":
+		top.PrevWord()
+		top.ClearHighlight()
+		top.EnsureCursorVisible()
+	case "0":
+		top.CursorIdx = 0
+		top.DesiredCol = 0
+		top.ClearHighlight()
+	case "$":
+		if top.CursorRow < len(top.BodyLines) {
+			toks := top.BodyLines[top.CursorRow].Tokens
+			if len(toks) > 0 {
+				top.CursorIdx = len(toks) - 1
+				top.UpdateDesiredCol()
+			}
+		}
+		top.ClearHighlight()
+	case "J":
+		top.Scroll++
+		if top.CursorRow < top.Scroll && top.Scroll < len(top.BodyLines) {
+			top.CursorRow = top.Scroll
+			top.ClampCursor()
+		}
+	case "K":
+		if top.Scroll > 0 {
+			top.Scroll--
 		}
 	case "ctrl+d":
-		m.Popup.Scroll += 5
+		top.Scroll += 5
+		if top.CursorRow < top.Scroll && top.Scroll < len(top.BodyLines) {
+			top.CursorRow = top.Scroll
+			top.ClampCursor()
+		}
 	case "ctrl+u":
-		m.Popup.Scroll = maxInt(0, m.Popup.Scroll-5)
+		top.Scroll = maxInt(0, top.Scroll-5)
 	}
 	return m, nil
 }
@@ -383,17 +472,24 @@ func (m *Model) triggerLookup(focusPopup bool) {
 		m.StatusMsg = "Lookup error: " + err.Error()
 		return
 	}
-	m.Popup.Result = res
-	m.Popup.Scroll = 0
-	m.Popup.Open = true
+
+	vh := m.viewportHeight()
+	cursorScreenRow := m.CursorRow - m.TopRow
+	cursorScreenCol := 0
+	if m.CursorRow < len(m.Doc.Lines) && m.CursorIdx < len(m.Doc.Lines[m.CursorRow].Tokens) {
+		cursorScreenCol = m.Doc.Lines[m.CursorRow].Tokens[m.CursorIdx].StartCol
+	}
+
+	p := NewPopupState(res, m.Cfg.ShowExamples, cursorScreenRow, cursorScreenCol)
+	pRow, pCol, pW, pH := ComputePopupPosition(cursorScreenRow, cursorScreenCol, m.Width, vh, 0)
+	p.LastRow = pRow
+	p.LastCol = pCol
+	p.BodyH = maxInt(3, pH-4)
+	p.RebuildBody(m.Styles, m.Cond, pW)
+
+	m.Popups = []PopupState{p}
 	if focusPopup {
 		m.Mode = ModePopup
-		m.Popup.Focused = true
-	}
-	if len(res.Terms) == 0 && len(res.Kanji) > 0 {
-		m.Popup.Tab = TabKanji
-	} else {
-		m.Popup.Tab = TabTerms
 	}
 	if res.MatchRuneLen > 0 {
 		m.HLStart = m.CursorIdx
@@ -403,9 +499,57 @@ func (m *Model) triggerLookup(focusPopup bool) {
 	}
 }
 
-func (m *Model) closePopup() {
-	m.Popup.Open = false
-	m.Popup.Focused = false
+func (m *Model) triggerChildLookup() {
+	if len(m.Popups) == 0 {
+		return
+	}
+	if len(m.Popups) >= m.MaxPopupDepth {
+		m.StatusMsg = fmt.Sprintf("Max popup depth (%d) reached", m.MaxPopupDepth)
+		return
+	}
+
+	parent := &m.Popups[len(m.Popups)-1]
+	vh := m.viewportHeight()
+	if len(parent.BodyLines) == 0 {
+		_, _, pW, _ := ComputePopupPosition(parent.AnchorRow, parent.AnchorCol, m.Width, vh, len(m.Popups)-1)
+		parent.RebuildBody(m.Styles, m.Cond, pW)
+	}
+
+	slice := parent.SliceFromCursor(24)
+	if strings.TrimSpace(slice) == "" {
+		return
+	}
+	res, err := m.Engine.Lookup(slice)
+	if err != nil {
+		m.StatusMsg = "Lookup error: " + err.Error()
+		return
+	}
+	if len(res.Terms) == 0 && len(res.Kanji) == 0 {
+		m.StatusMsg = "No entry at cursor"
+		return
+	}
+
+	if res.MatchRuneLen > 0 {
+		parent.HLStart = parent.CursorIdx
+		parent.HLEnd = parent.CursorIdx + res.MatchRuneLen
+	} else {
+		parent.ClearHighlight()
+	}
+
+	anchorRow, anchorCol := parent.CursorScreenPos()
+	depth := len(m.Popups)
+	child := NewPopupState(res, parent.ShowExamples, anchorRow, anchorCol)
+	pRow, pCol, pW, pH := ComputePopupPosition(anchorRow, anchorCol, m.Width, vh, depth)
+	child.LastRow = pRow
+	child.LastCol = pCol
+	child.BodyH = maxInt(3, pH-4)
+	child.RebuildBody(m.Styles, m.Cond, pW)
+
+	m.Popups = append(m.Popups, child)
+}
+
+func (m *Model) closeAllPopups() {
+	m.Popups = nil
 	m.Mode = ModeNormal
 	m.clearHighlight()
 }
@@ -485,15 +629,27 @@ func (m *Model) View() string {
 		}
 	}
 
-	// Composite floating popup if open
-	if m.Popup.Open && m.Popup.Result != nil {
-		cursorScreenRow := m.CursorRow - m.TopRow
-		cursorScreenCol := 0
-		if m.CursorRow < len(m.Doc.Lines) && m.CursorIdx < len(m.Doc.Lines[m.CursorRow].Tokens) {
-			cursorScreenCol = m.Doc.Lines[m.CursorRow].Tokens[m.CursorIdx].StartCol
+	// Composite floating popup stack (bottom-to-top)
+	for i := range m.Popups {
+		p := &m.Popups[i]
+		if p.Result == nil {
+			continue
 		}
-		pRow, pCol, pW, pH := ComputePopupPosition(cursorScreenRow, cursorScreenCol, m.Width, vh)
-		popupLines := m.Popup.RenderLines(m.Styles, m.Cond, pW, pH)
+		anchorRow, anchorCol := p.AnchorRow, p.AnchorCol
+		if i == 0 {
+			anchorRow = m.CursorRow - m.TopRow
+			anchorCol = 0
+			if m.CursorRow < len(m.Doc.Lines) && m.CursorIdx < len(m.Doc.Lines[m.CursorRow].Tokens) {
+				anchorCol = m.Doc.Lines[m.CursorRow].Tokens[m.CursorIdx].StartCol
+			}
+			p.AnchorRow = anchorRow
+			p.AnchorCol = anchorCol
+		}
+		pRow, pCol, pW, pH := ComputePopupPosition(anchorRow, anchorCol, m.Width, vh, i)
+		p.LastRow = pRow
+		p.LastCol = pCol
+		active := (i == len(m.Popups)-1) && (m.Mode == ModePopup)
+		popupLines := p.RenderLines(m.Styles, m.Cond, pW, pH, i+1, m.MaxPopupDepth, active)
 		viewLines = cjk.CompositePopup(m.Cond, viewLines, popupLines, pRow, pCol, m.Width)
 	}
 
@@ -502,7 +658,7 @@ func (m *Model) View() string {
 	out.WriteString("\n")
 
 	if m.ShowHelp {
-		out.WriteString(m.Styles.HelpBar.Width(m.Width).Render("hjkl:move  w/b:word  Enter/Space:lookup  a:auto-scan  /:search  ?:help  q:quit"))
+		out.WriteString(m.Styles.HelpBar.Width(m.Width).Render("hjkl:move  w/b:word  Enter/Space:lookup/dive  a:auto-scan  /:search  Esc:pop  q:quit"))
 		out.WriteString("\n")
 	}
 
@@ -511,7 +667,7 @@ func (m *Model) View() string {
 	} else {
 		modeStr := "NORMAL"
 		if m.Mode == ModePopup {
-			modeStr = "POPUP"
+			modeStr = fmt.Sprintf("POPUP [%d/%d]", len(m.Popups), m.MaxPopupDepth)
 		} else if m.AutoScan {
 			modeStr = "AUTO-SCAN"
 		}

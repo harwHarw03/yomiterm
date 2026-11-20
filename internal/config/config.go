@@ -14,6 +14,7 @@ type Config struct {
 	AutoScan                bool   `toml:"auto_scan"`
 	EastAsianAmbiguousWidth int    `toml:"east_asian_ambiguous_width"`
 	Theme                   string `toml:"theme"`
+	MaxPopupDepth           int    `toml:"max_popup_depth"`
 }
 
 // DefaultConfig returns sensible defaults for cross-platform terminal use.
@@ -24,6 +25,7 @@ func DefaultConfig() *Config {
 		AutoScan:                false,
 		EastAsianAmbiguousWidth: 1,
 		Theme:                   "auto",
+		MaxPopupDepth:           5,
 	}
 }
 
@@ -81,6 +83,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Theme == "" {
 		cfg.Theme = "auto"
+	}
+	if cfg.MaxPopupDepth < 1 {
+		cfg.MaxPopupDepth = 5
 	}
 	return cfg, nil
 }
